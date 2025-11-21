@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package frequencia;
+
+option go_package = "stopwords_project/frequencia";
+
+// Serviço compartilhado
+service Analisador {
+  rpc AnalisarTexto (TextoRequest) returns (ResultadoResponse);
+}
+
+message TextoRequest {
+  string texto = 1;
+}
+
+message Metricas {
+  int64 tempo_processamento_nanos = 1;
+  int32 workers_usados = 2;
+}
+
+message ResultadoResponse {
+  int32 total_palavras = 1;
+  int32 palavras_unicas = 2;
+  map<string, int32> contagem = 3; // Mapa de frequência
+  repeated string top_5 = 4;       // Lista das top palavras
+  Metricas metricas = 5;
+}
