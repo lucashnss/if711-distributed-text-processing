@@ -122,7 +122,7 @@ type ResultadoResponse struct {
 	TotalPalavras  int32                  `protobuf:"varint,1,opt,name=total_palavras,json=totalPalavras,proto3" json:"total_palavras,omitempty"`
 	PalavrasUnicas int32                  `protobuf:"varint,2,opt,name=palavras_unicas,json=palavrasUnicas,proto3" json:"palavras_unicas,omitempty"`
 	Contagem       map[string]int32       `protobuf:"bytes,3,rep,name=contagem,proto3" json:"contagem,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"` // Mapa de frequência
-	Top_5          []string               `protobuf:"bytes,4,rep,name=top_5,json=top5,proto3" json:"top_5,omitempty"`                                                                        // Lista das top palavras
+	TopPalavras    []string               `protobuf:"bytes,4,rep,name=top_palavras,json=topPalavras,proto3" json:"top_palavras,omitempty"`                                                   // Lista das top palavras
 	Metricas       *Metricas              `protobuf:"bytes,5,opt,name=metricas,proto3" json:"metricas,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -179,9 +179,9 @@ func (x *ResultadoResponse) GetContagem() map[string]int32 {
 	return nil
 }
 
-func (x *ResultadoResponse) GetTop_5() []string {
+func (x *ResultadoResponse) GetTopPalavras() []string {
 	if x != nil {
-		return x.Top_5
+		return x.TopPalavras
 	}
 	return nil
 }
@@ -203,12 +203,12 @@ const file_frequencia_proto_rawDesc = "" +
 	"\x05texto\x18\x01 \x01(\tR\x05texto\"m\n" +
 	"\bMetricas\x12:\n" +
 	"\x19tempo_processamento_nanos\x18\x01 \x01(\x03R\x17tempoProcessamentoNanos\x12%\n" +
-	"\x0eworkers_usados\x18\x02 \x01(\x05R\rworkersUsados\"\xb0\x02\n" +
+	"\x0eworkers_usados\x18\x02 \x01(\x05R\rworkersUsados\"\xbe\x02\n" +
 	"\x11ResultadoResponse\x12%\n" +
 	"\x0etotal_palavras\x18\x01 \x01(\x05R\rtotalPalavras\x12'\n" +
 	"\x0fpalavras_unicas\x18\x02 \x01(\x05R\x0epalavrasUnicas\x12G\n" +
-	"\bcontagem\x18\x03 \x03(\v2+.frequencia.ResultadoResponse.ContagemEntryR\bcontagem\x12\x13\n" +
-	"\x05top_5\x18\x04 \x03(\tR\x04top5\x120\n" +
+	"\bcontagem\x18\x03 \x03(\v2+.frequencia.ResultadoResponse.ContagemEntryR\bcontagem\x12!\n" +
+	"\ftop_palavras\x18\x04 \x03(\tR\vtopPalavras\x120\n" +
 	"\bmetricas\x18\x05 \x01(\v2\x14.frequencia.MetricasR\bmetricas\x1a;\n" +
 	"\rContagemEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
