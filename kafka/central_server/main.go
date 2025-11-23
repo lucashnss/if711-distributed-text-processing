@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"sort"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -28,6 +30,8 @@ const (
 	FinalResultTopic = "results"
 	ChunkSizeWords   = 100
 	TopNWords        = 10
+	KafkaWriteMaxRetries  = 5
+	KafkaWriteBaseBackoff = 150 * time.Millisecond
 )
 
 type ConsolidationState struct {
@@ -52,6 +56,15 @@ func newKafkaWriter() *kafka.Writer {
 		Brokers:  kafkaBrokers,
 		Topic:    DividedTopic,
 		Balancer: &kafka.LeastBytes{},
+	})
+}
+
+func newKafkaWriterForTopic(topic string) *kafka.Writer {
+	return kafka.NewWriter(kafka.WriterConfig{
+		Brokers:      kafkaBrokers,
+		Topic:        topic,
+		Balancer:     &kafka.LeastBytes{},
+		RequiredAcks: int(kafka.RequireAll), // força confirmação de líder
 	})
 }
 
@@ -91,12 +104,48 @@ func getHeaderValue(headers []kafka.Header, key string) string {
 	return ""
 }
 
+func isNotLeaderErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "Not Leader For Partition")
+}
+
+// writeWithRetry tenta enviar mensagens recriando writer se erro de liderança ocorrer.
+func writeWithRetry(ctx context.Context, makeWriter func() *kafka.Writer, w **kafka.Writer, msgs []kafka.Message) error {
+	var lastErr error
+	for attempt := 1; attempt <= KafkaWriteMaxRetries; attempt++ {
+		if *w == nil {
+			*w = makeWriter()
+		}
+		lastErr = (*w).WriteMessages(ctx, msgs...)
+		if lastErr == nil {
+			return nil
+		}
+		if isNotLeaderErr(lastErr) {
+			(*w).Close()
+			*w = nil // força recriação
+		}
+		time.Sleep(KafkaWriteBaseBackoff * time.Duration(attempt))
+	}
+	return errors.New("write failed after retries: " + lastErr.Error())
+}
+
+/*
+Correlacionamento:
+Cada texto original recebe um task_id (a própria Kafka message key ou um UUID gerado se vazio).
+Esse task_id é colocado em todos os chunks (header: source-key).
+Os workers devolvem contagens parciais no tópico partial_word_counts mantendo o header source-key.
+O consolidator só acumula resultados dentro de consolidationMap[source-key], impedindo mistura entre tarefas.
+Quando ReceivedChunks == TotalChunks a tarefa é finalizada e removida.
+*/
+
 func runChunker(wg *sync.WaitGroup) {
 	defer wg.Done()
 	r := newKafkaReader(Topic, "chunker-group")
 	defer r.Close()
-	writer := newKafkaWriter()
-	defer writer.Close()
+	writer := newKafkaWriterForTopic(DividedTopic)
+	defer func() { if writer != nil { writer.Close() } }()
 
 	log.Println("Iniciando leitura do tópico:", Topic)
 
@@ -108,6 +157,9 @@ func runChunker(wg *sync.WaitGroup) {
 		}
 
 		origKey := string(m.Key)
+		if len(origKey) == 0 {
+			origKey = uuid.NewString() // garante unicidade para correlação
+		}
 		texto := string(m.Value)
 		chunks := chunkWords(texto, ChunkSizeWords)
 		total := len(chunks)
@@ -145,9 +197,9 @@ func runChunker(wg *sync.WaitGroup) {
 			})
 		}
 
-		err = writer.WriteMessages(context.Background(), messagesToSend...)
+		err = writeWithRetry(context.Background(), func() *kafka.Writer { return newKafkaWriterForTopic(DividedTopic) }, &writer, messagesToSend)
 		if err != nil {
-			log.Printf("Falha enviando chunks para key=%s: %v", origKey, err)
+			log.Printf("Falha enviando chunks para key=%s após retries: %v", origKey, err)
 			// Não faz o commit, para reprocessar a mensagem
 			continue
 		}
@@ -167,12 +219,8 @@ func runConsolidator(wg *sync.WaitGroup) {
 	r := newKafkaReader(ResultTopic, "consolidator-group")
 	defer r.Close()
 
-	resultWriter := kafka.NewWriter(kafka.WriterConfig{
-		Brokers:  kafkaBrokers,
-		Topic:    FinalResultTopic,
-		Balancer: &kafka.LeastBytes{},
-	})
-	defer resultWriter.Close()
+	resultWriter := newKafkaWriterForTopic(FinalResultTopic)
+	defer func() { if resultWriter != nil { resultWriter.Close() } }()
 
 	log.Println("Iniciando leitura do tópico de resultados:", ResultTopic)
 
@@ -184,6 +232,7 @@ func runConsolidator(wg *sync.WaitGroup) {
 		}
 
 		sourceKey := getHeaderValue(m.Headers, "source-key")
+		// Observação: se workers mantêm esse header, não há risco de misturar diferentes textos.
 		if sourceKey == "" {
 			log.Printf("Mensagem de resultado sem 'source-key' no header. Ignorando.")
 			if err := r.CommitMessages(context.Background(), m); err != nil {
@@ -282,9 +331,9 @@ func runConsolidator(wg *sync.WaitGroup) {
 				},
 			}
 
-			err = resultWriter.WriteMessages(context.Background(), msg)
+			err = writeWithRetry(context.Background(), func() *kafka.Writer { return newKafkaWriterForTopic(FinalResultTopic) }, &resultWriter, []kafka.Message{msg})
 			if err != nil {
-				log.Printf("Falha ao enviar resultado consolidado para %s: %v", sourceKey, err)
+				log.Printf("Falha ao enviar resultado consolidado para %s após retries: %v", sourceKey, err)
 				// Não deleta o estado para possível re-tentativa
 				continue
 			}

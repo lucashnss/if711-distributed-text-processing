@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 	"time"
 
@@ -39,6 +41,7 @@ Para o estudante de ciência da computação ou para o engenheiro de software, e
 O futuro da tecnologia é incerto, mas a tendência de integração e automação é clara. A Internet das Coisas (IoT) promete conectar cada objeto do nosso cotidiano à rede, gerando ainda mais dados e exigindo ainda mais capacidade de processamento em tempo real. A realidade aumentada e virtual prometem mudar a forma como interagimos com o mundo digital. E no centro de tudo isso, está o código. Linhas de texto escritas por seres humanos (e cada vez mais por máquinas) que definem as regras desse novo universo digital.
 Portanto, ao estudar programação concorrente, sistemas distribuídos ou compiladores, lembre-se de que você está caminhando sobre os ombros de gigantes. Você é parte de uma linhagem contínua de inovadores que transformaram a areia (silício) em inteligência. A computação é, em última análise, a extensão da mente humana, uma ferramenta para expandir nosso potencial e resolver os problemas mais complexos do nosso tempo. Seja otimizando um algoritmo de ordenação ou arquitetando uma rede neural, cada linha de código contribui para essa grande tapeçaria tecnológica que envolve o planeta. O desafio agora é garantir que essa tecnologia continue a servir à humanidade de forma ética, sustentável e inclusiva para as próximas gerações.
 `
+var TextoEnviar = strings.TrimSpace(TextoTeste)
 
 func newWriter() *kafka.Writer {
 	return kafka.NewWriter(kafka.WriterConfig{
@@ -67,9 +70,69 @@ func newMessage(taskID string, text string) kafka.Message {
 	}
 }
 
+// calcStats calcula média e desvio padrão das durações.
+func calcStats(durations []time.Duration) (time.Duration, time.Duration) {
+	if len(durations) == 0 {
+		return 0, 0
+	}
+	var sum float64
+	for _, d := range durations {
+		sum += float64(d)
+	}
+	mean := sum / float64(len(durations))
+	var varianceSum float64
+	for _, d := range durations {
+		diff := float64(d) - mean
+		varianceSum += diff * diff
+	}
+	variance := varianceSum / float64(len(durations)-1)
+	return time.Duration(mean), time.Duration(math.Sqrt(variance))
+}
+
+// runBenchmark executa várias escritas no Kafka medindo tempo de WriteMessages.
+func runBenchmark(w *kafka.Writer, iterations int, payload string) error {
+	durations := make([]time.Duration, iterations)
+	ctx := context.Background()
+	for i := 0; i < iterations; i++ {
+		taskID := fmt.Sprintf("bench-%d-%d", i, time.Now().UnixNano())
+		msg := newMessage(taskID, payload) // antes: "benchmark-payload"
+		start := time.Now()
+		if err := w.WriteMessages(ctx, msg); err != nil {
+			return fmt.Errorf("erro na iteração %d: %w", i, err)
+		}
+		durations[i] = time.Since(start)
+	}
+	mean, std := calcStats(durations)
+	fmt.Println("\n--- Benchmark Kafka Producer ---")
+	fmt.Printf("Iterações        : %d\n", iterations)
+	fmt.Printf("Tempo médio      : %v\n", mean)
+	fmt.Printf("Desvio padrão    : %v\n", std)
+	fmt.Printf("Primeira escrita : %v\n", durations[0])
+	fmt.Printf("Última escrita   : %v\n", durations[len(durations)-1])
+	fmt.Println("--------------------------------")
+	return nil
+}
+
 func main() {
+	// Flags de benchmark.
+	benchFlag := flag.Bool("bench", false, "Executa benchmark de envio de mensagens")
+	iterFlag := flag.Int("iterations", 100000, "Número de iterações do benchmark")
+	flag.Parse()
+
 	w := newWriter()
 	defer w.Close()
+
+	if *benchFlag {
+		if *iterFlag <= 0 {
+			log.Fatalf("iterations deve ser > 0")
+		}
+		textoEnviar := TextoEnviar
+		log.Printf("Iniciando benchmark (%d iterações) enviando TextoEnviar (%d bytes)...", *iterFlag, len(textoEnviar))
+		if err := runBenchmark(w, *iterFlag, textoEnviar); err != nil {
+			log.Fatalf("Falha no benchmark: %v", err)
+		}
+		return
+	}
 
 	textInput := strings.TrimSpace(TextoTeste)
 
