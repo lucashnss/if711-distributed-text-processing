@@ -34,6 +34,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
     volumes:
       - kafka1-data:/var/lib/kafka/data
+      - ./scripts:/scripts
     networks:
       - kafka-net
 

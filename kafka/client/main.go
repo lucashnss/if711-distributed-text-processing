@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/segmentio/kafka-go"
@@ -54,24 +56,16 @@ func main() {
 	w := newWriter()
 	defer w.Close()
 
-	var filePath string
-	if len(os.Args) < 2 {
-		log.Println("Nenhum arquivo especificado. Usando 'input.txt' como padrão.")
-		filePath = "input.txt"
-	} else {
-		filePath = os.Args[1]
-	}
+	log.Println("Por favor, insira o texto para análise. Pressione Ctrl+D (Linux/macOS) ou Ctrl+Z e Enter (Windows) para finalizar.")
 
-	log.Printf("Lendo texto do arquivo: %s", filePath)
-	textBytes, err := os.ReadFile(filePath)
+	textBytes, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		log.Fatalf("Falha ao ler o arquivo: %v. Certifique-se que o arquivo existe.", err)
+		log.Fatalf("Falha ao ler a entrada do terminal: %v", err)
 	}
-
-	textInput := string(textBytes)
+	textInput := strings.TrimSpace(string(textBytes))
 
 	if textInput == "" {
-		log.Println("O arquivo está vazio. Encerrando.")
+		log.Println("Nenhuma entrada fornecida. Encerrando.")
 		return
 	}
 
@@ -99,6 +93,10 @@ func main() {
 	for {
 		msg, err := r.ReadMessage(resultCtx)
 		if err != nil {
+			if err == context.DeadlineExceeded {
+				log.Println("Tempo de espera pelo resultado excedido. Nenhum resultado recebido.")
+				break
+			}
 			log.Fatalf("Falha ao ler mensagem de resultado: %v", err)
 		}
 
