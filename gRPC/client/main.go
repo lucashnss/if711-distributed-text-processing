@@ -14,7 +14,7 @@ import (
 
 // Configuração do Teste
 const (
-	TotalExecucoes = 100000
+	TotalExecucoes = 10000
 	EnderecoCentral = "localhost:50051"
 )
 
@@ -57,25 +57,39 @@ func main() {
 	inicioTotal := time.Now()
 
 	for i := 0; i < TotalExecucoes; i++ {
-		// Medição de tempo da requisição individual (Latência do Cliente)
+		// VAMOS CAPTURAR O RESULTADO SOMENTE NA PRIMEIRA EXECUÇÃO (i == 0)
+		var resp *pb.ResultadoResponse
+		var execucaoErr error
+        
 		inicioReq := time.Now()
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-		_, err := client.AnalisarTexto(ctx, &pb.TextoRequest{Texto: TextoTeste})
+        
+        // TROCA: Captura a resposta
+		resp, execucaoErr = client.AnalisarTexto(ctx, &pb.TextoRequest{Texto: TextoTeste})
 		cancel()
 
 		duracao := time.Since(inicioReq)
 
-		if err != nil {
-			log.Printf("Erro na execução %d: %v", i, err)
-			continue // Não conta para a estatística se falhar
+		if execucaoErr != nil {
+			log.Printf("Erro na execução %d: %v", i, execucaoErr)
+			continue
 		}
+        
+        // EXIBE O RESULTADO APENAS UMA VEZ PARA VERIFICAÇÃO
+        if i == 0 {
+            fmt.Println("\n--- Amostra do Processamento (Primeira Invocação) ---")
+            fmt.Printf("Total de Palavras significativas: %d\n", resp.TotalPalavras)
+            fmt.Printf("Palavras Únicas: %d\n", resp.PalavrasUnicas)
+            fmt.Printf("Top 10: %v\n", resp.GetTopPalavras())
+            fmt.Println("-------------------------------------------------------")
+        }
 
 		// Armazena em microssegundos
 		tempos = append(tempos, float64(duracao.Microseconds()))
 
 		// Barra de progresso simples
-		if (i+1)%10000 == 0 {
+		if (i+1)%1000 == 0 {
 			fmt.Printf("Completado: %d/%d\n", i+1, TotalExecucoes)
 		}
 	}
